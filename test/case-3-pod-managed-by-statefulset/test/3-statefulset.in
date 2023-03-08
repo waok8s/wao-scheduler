@@ -1,0 +1,2 @@
+# is statefulset/test-statefulset ok?
+kubectl get statefulset -n default test-statefulset | grep "3/3" | wc -l
