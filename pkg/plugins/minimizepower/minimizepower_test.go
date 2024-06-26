@@ -12,7 +12,7 @@ import (
 	framework "k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
-func Test_PowerConsumptions2Scores(t *testing.T) {
+func Test_NormalizeValues2Scores(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      framework.NodeScoreList
@@ -136,7 +136,7 @@ func Test_PowerConsumptions2Scores(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			PowerConsumptions2Scores(tt.input, tt.baseScore, tt.replaceMap)
+			NormalizeValues2Scores(tt.input, tt.baseScore, tt.replaceMap)
 			if got := tt.input; !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("PowerConsumptions2Scores() = %v, want %v", got, tt.want)
 			} else {
@@ -210,6 +210,201 @@ func TestPodCPURequestOrLimit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if gotV := PodCPURequestOrLimit(tt.args.pod); !floatEquals(gotV, tt.wantV) {
 				t.Errorf("PodCPURequestOrLimit() = %v, want %v", gotV, tt.wantV)
+			}
+		})
+	}
+}
+
+func TestMergeInt32AndSplitInt64(t *testing.T) {
+	type args struct {
+		a int32
+		b int32
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{name: "0,0", args: args{a: 0, b: 0}},
+		{name: "0,1", args: args{a: 0, b: 1}},
+		{name: "1,0", args: args{a: 1, b: 0}},
+		{name: "1,1", args: args{a: 1, b: 1}},
+		{name: "0,-1", args: args{a: 0, b: -1}},
+		{name: "-1,0", args: args{a: -1, b: 0}},
+		{name: "-1,-1", args: args{a: -1, b: -1}},
+		{name: "max,max", args: args{a: math.MaxInt32, b: math.MaxInt32}},
+		{name: "min,max", args: args{a: math.MinInt32, b: math.MaxInt32}},
+		{name: "max,min", args: args{a: math.MaxInt32, b: math.MinInt32}},
+		{name: "min,min", args: args{a: math.MinInt32, b: math.MinInt32}},
+		{name: "random1", args: args{a: 123456, b: -654321}},
+		{name: "random2", args: args{a: 342638485, b: 217485171}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, b := SplitInt64(MergeInt32(tt.args.a, tt.args.b))
+			if a != tt.args.a || b != tt.args.b {
+				t.Errorf("SplitInt64(MergeInt32()) = %v, %v, want %v, %v", a, b, tt.args.a, tt.args.b)
+			}
+		})
+	}
+}
+
+func TestMergeScores(t *testing.T) {
+	type args struct {
+		scoresPC framework.NodeScoreList
+		scoresRT framework.NodeScoreList
+		weightPC int
+		weightRT int
+	}
+	tests := []struct {
+		name string
+		args args
+		want framework.NodeScoreList
+	}{
+		{
+			name: "1:1",
+			args: args{
+				scoresPC: framework.NodeScoreList{
+					{Name: "n0", Score: 0},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 100},
+				},
+				scoresRT: framework.NodeScoreList{
+					{Name: "n0", Score: 100},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 0},
+				},
+				weightPC: 50,
+				weightRT: 50,
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 50},
+				{Name: "n1", Score: 50},
+				{Name: "n2", Score: 50},
+			},
+		},
+		{
+			name: "2:1",
+			args: args{
+				scoresPC: framework.NodeScoreList{
+					{Name: "n0", Score: 0},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 100},
+				},
+				scoresRT: framework.NodeScoreList{
+					{Name: "n0", Score: 100},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 0},
+				},
+				weightPC: 2,
+				weightRT: 1,
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 33},
+				{Name: "n1", Score: 50},
+				{Name: "n2", Score: 66},
+			},
+		},
+		{
+			name: "0:1 (ignore PC)",
+			args: args{
+				scoresPC: framework.NodeScoreList{
+					{Name: "n0", Score: 0},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 100},
+				},
+				scoresRT: framework.NodeScoreList{
+					{Name: "n0", Score: 100},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 0},
+				},
+				weightPC: 0,
+				weightRT: 1,
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 100},
+				{Name: "n1", Score: 50},
+				{Name: "n2", Score: 0},
+			},
+		},
+		{
+			name: "1:0 (ignore RT)",
+			args: args{
+				scoresPC: framework.NodeScoreList{
+					{Name: "n0", Score: 0},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 100},
+				},
+				scoresRT: framework.NodeScoreList{
+					{Name: "n0", Score: 100},
+					{Name: "n1", Score: 50},
+					{Name: "n2", Score: 0},
+				},
+				weightPC: 1,
+				weightRT: 0,
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 0},
+				{Name: "n1", Score: 50},
+				{Name: "n2", Score: 100},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := MergeScores(tt.args.scoresPC, tt.args.scoresRT, tt.args.weightPC, tt.args.weightRT); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("MergeScores() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetAppName(t *testing.T) {
+	type args struct {
+		podLabels map[string]string
+		labelList []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "podLabels is nil",
+			args: args{
+				podLabels: nil,
+				labelList: []string{"app", "name"},
+			},
+			want: "",
+		},
+		{
+			name: "labelList is nil",
+			args: args{
+				podLabels: map[string]string{"app": "test-app", "name": "test-name"},
+				labelList: nil,
+			},
+			want: "",
+		},
+		{
+			name: "both are nil",
+			args: args{
+				podLabels: nil,
+				labelList: nil,
+			},
+			want: "",
+		},
+		{
+			name: "normal",
+			args: args{
+				podLabels: map[string]string{"app": "test-app", "name": "test-name"},
+				labelList: []string{"foobar", "app", "name"},
+			},
+			want: "test-app",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetAppName(tt.args.podLabels, tt.args.labelList); got != tt.want {
+				t.Errorf("GetAppName() = %v, want %v", got, tt.want)
 			}
 		})
 	}

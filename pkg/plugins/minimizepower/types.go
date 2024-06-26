@@ -31,9 +31,17 @@ type MinimizePowerArgs struct {
 	MetricsCacheTTL   metav1.Duration `json:"metricsCacheTTL,omitempty"`
 	PredictorCacheTTL metav1.Duration `json:"predictorCacheTTL,omitempty"`
 
+	// PodUsageAssumption is the assumed fraction of CPU usage that a pod uses, must be [0.0, 1.0]
 	PodUsageAssumption float64 `json:"podUsageAssumption,omitempty"`
 
+	// CPUUsageFormat is the format of the CPU usage to use for predictions,
+	// options are `Raw` [0.0, NumLogicalCores] or `Percent` [0, 100].
 	CPUUsageFormat string `json:"cpuUsageFormat,omitempty"`
+
+	// WeightPowerConsumption is the weight to give to power consumption in the score, must be >= 0.
+	WeightPowerConsumption int `json:"weightPowerConsumption,omitempty"`
+	// WeightResponseTime is the weight to give to response time in the score, must be >= 0.
+	WeightResponseTime int `json:"weightResponseTime,omitempty"`
 }
 
 func (args *MinimizePowerArgs) Default() {
@@ -54,6 +62,12 @@ func (args *MinimizePowerArgs) Default() {
 		args.CPUUsageFormat = CPUUsageFormatPercent
 	}
 
+	// If both weights are 0, it means that the user has not set them, so we set them to 1
+	if args.WeightPowerConsumption == 0 && args.WeightResponseTime == 0 {
+		args.WeightPowerConsumption = 1
+		args.WeightResponseTime = 1
+	}
+
 }
 
 func (args *MinimizePowerArgs) Validate() error {
@@ -64,6 +78,14 @@ func (args *MinimizePowerArgs) Validate() error {
 
 	if args.CPUUsageFormat != CPUUsageFormatRaw && args.CPUUsageFormat != CPUUsageFormatPercent {
 		return fmt.Errorf("cpuUsageFormat must be either `Raw` or `Percent`")
+	}
+
+	if args.WeightPowerConsumption < 0 {
+		return fmt.Errorf("weightPowerConsumption must be greater than or equal to 0")
+	}
+
+	if args.WeightResponseTime < 0 {
+		return fmt.Errorf("weightResponseTime must be greater than or equal to 0")
 	}
 
 	return nil
