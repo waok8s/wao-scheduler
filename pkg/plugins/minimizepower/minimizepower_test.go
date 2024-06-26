@@ -1,15 +1,18 @@
 package minimizepower
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"reflect"
 	"testing"
 
+	waoclient "github.com/waok8s/wao-core/pkg/client"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	framework "k8s.io/kubernetes/pkg/scheduler/framework"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func Test_NormalizeValues2Scores(t *testing.T) {
@@ -184,6 +187,18 @@ func podWithResourceCPU(requests []string, limits []string) *corev1.Pod {
 	}
 
 	return pod
+}
+
+// podSetLabelsAndAnnotations returns a copy of the given pod with the given labels and annotations set (does not modify the original pod).
+func podSetLabelsAndAnnotations(pod *corev1.Pod, labels map[string]string, annotations map[string]string) *corev1.Pod {
+	v := pod.DeepCopy()
+	if labels != nil {
+		v.SetLabels(labels)
+	}
+	if annotations != nil {
+		v.SetAnnotations(annotations)
+	}
+	return v
 }
 
 var Epsilon float64 = 0.00000001
@@ -405,6 +420,201 @@ func TestGetAppName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := GetAppName(tt.args.podLabels, tt.args.labelList); got != tt.want {
 				t.Errorf("GetAppName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMinimizePower_NormalizeScore(t *testing.T) {
+	type fields struct {
+		snapshotSharedLister framework.SharedLister
+		ctrlclient           client.Client
+		metricsclient        *waoclient.CachedMetricsClient
+		predictorclient      *waoclient.CachedPredictorClient
+		args                 *MinimizePowerArgs
+	}
+	type args struct {
+		ctx        context.Context
+		cycleState *framework.CycleState
+		pod        *corev1.Pod
+		scores     framework.NodeScoreList
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   framework.NodeScoreList
+	}{
+		{
+			name: "e2e | same weight",
+			fields: fields{
+				args: &MinimizePowerArgs{
+					WeightPowerConsumption: 1,
+					WeightResponseTime:     1,
+				},
+			},
+			args: args{
+				pod: podSetLabelsAndAnnotations(
+					podWithResourceCPU([]string{"100m"}, []string{"200m"}),
+					map[string]string{},
+					map[string]string{},
+				),
+				scores: framework.NodeScoreList{
+					{Name: "n0", Score: MergeInt32(0, 100)}, // score will be mapped to: 0->100, 50->60, 100->20
+					{Name: "n1", Score: MergeInt32(50, 50)},
+					{Name: "n2", Score: MergeInt32(100, 0)},
+				},
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 60}, // pc=100, rt=20, weight=1:1, score=60
+				{Name: "n1", Score: 60}, // pc=60, rt=60, weight=1:1, score=60
+				{Name: "n2", Score: 60}, // pc=20, rt=100, weight=1:1, score=60
+			},
+		},
+		{
+			name: "e2e | only PC",
+			fields: fields{
+				args: &MinimizePowerArgs{
+					WeightPowerConsumption: 1,
+					WeightResponseTime:     0,
+				},
+			},
+			args: args{
+				pod: podSetLabelsAndAnnotations(
+					podWithResourceCPU([]string{"100m"}, []string{"200m"}),
+					map[string]string{},
+					map[string]string{},
+				),
+				scores: framework.NodeScoreList{
+					{Name: "n0", Score: MergeInt32(0, 100)}, // score will be mapped to: 0->100, 50->60, 100->20
+					{Name: "n1", Score: MergeInt32(50, 50)},
+					{Name: "n2", Score: MergeInt32(100, 0)},
+				},
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 100}, // pc=100, rt=20, weight=1:0, score=100
+				{Name: "n1", Score: 60},  // pc=60, rt=60, weight=1:0, score=60
+				{Name: "n2", Score: 20},  // pc=20, rt=100, weight=1:0, score=20
+			},
+		},
+		{
+			name: "e2e | only RT",
+			fields: fields{
+				args: &MinimizePowerArgs{
+					WeightPowerConsumption: 0,
+					WeightResponseTime:     1,
+				},
+			},
+			args: args{
+				pod: podSetLabelsAndAnnotations(
+					podWithResourceCPU([]string{"100m"}, []string{"200m"}),
+					map[string]string{},
+					map[string]string{},
+				),
+				scores: framework.NodeScoreList{
+					{Name: "n0", Score: MergeInt32(0, 100)}, // score will be mapped to: 0->100, 50->60, 100->20
+					{Name: "n1", Score: MergeInt32(50, 50)},
+					{Name: "n2", Score: MergeInt32(100, 0)},
+				},
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 20},  // pc=100, rt=20, weight=0:1, score=20
+				{Name: "n1", Score: 60},  // pc=60, rt=60, weight=0:1, score=60
+				{Name: "n2", Score: 100}, // pc=20, rt=100, weight=0:1, score=100
+			},
+		},
+		{
+			name: "e2e | 6:4",
+			fields: fields{
+				args: &MinimizePowerArgs{
+					WeightPowerConsumption: 6,
+					WeightResponseTime:     4,
+				},
+			},
+			args: args{
+				pod: podSetLabelsAndAnnotations(
+					podWithResourceCPU([]string{"100m"}, []string{"200m"}),
+					map[string]string{},
+					map[string]string{},
+				),
+				scores: framework.NodeScoreList{
+					{Name: "n0", Score: MergeInt32(0, 100)}, // score will be mapped to: 0->100, 50->60, 100->20
+					{Name: "n1", Score: MergeInt32(50, 50)},
+					{Name: "n2", Score: MergeInt32(100, 0)},
+				},
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 68}, // pc=100, rt=20, weight=6:4, score=68
+				{Name: "n1", Score: 60}, // pc=60, rt=60, weight=6:4, score=60
+				{Name: "n2", Score: 52}, // pc=20, rt=100, weight=6:4, score=52
+			},
+		},
+		{
+			name: "e2e | override weights",
+			fields: fields{
+				args: &MinimizePowerArgs{
+					WeightPowerConsumption: 1,
+					WeightResponseTime:     1,
+				},
+			},
+			args: args{
+				pod: podSetLabelsAndAnnotations(
+					podWithResourceCPU([]string{"100m"}, []string{"200m"}),
+					map[string]string{},
+					map[string]string{AnnotationWeightPowerConsumption: "6", AnnotationWeightResponseTime: "4"},
+				),
+				scores: framework.NodeScoreList{
+					{Name: "n0", Score: MergeInt32(0, 100)}, // score will be mapped to: 0->100, 50->60, 100->20
+					{Name: "n1", Score: MergeInt32(50, 50)},
+					{Name: "n2", Score: MergeInt32(100, 0)},
+				},
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 68}, // pc=100, rt=20, weight=6:4, score=68
+				{Name: "n1", Score: 60}, // pc=60, rt=60, weight=6:4, score=60
+				{Name: "n2", Score: 52}, // pc=20, rt=100, weight=6:4, score=52
+			},
+		},
+		{
+			name: "e2e | override weights fail",
+			fields: fields{
+				args: &MinimizePowerArgs{
+					WeightPowerConsumption: 1,
+					WeightResponseTime:     1,
+				},
+			},
+			args: args{
+				pod: podSetLabelsAndAnnotations(
+					podWithResourceCPU([]string{"100m"}, []string{"200m"}),
+					map[string]string{},
+					map[string]string{AnnotationWeightPowerConsumption: "foo", AnnotationWeightResponseTime: "bar"},
+				),
+				scores: framework.NodeScoreList{
+					{Name: "n0", Score: MergeInt32(0, 100)}, // score will be mapped to: 0->100, 50->60, 100->20
+					{Name: "n1", Score: MergeInt32(50, 50)},
+					{Name: "n2", Score: MergeInt32(100, 0)},
+				},
+			},
+			want: framework.NodeScoreList{
+				{Name: "n0", Score: 60}, // pc=100, rt=20, weight=1:1, score=60
+				{Name: "n1", Score: 60}, // pc=60, rt=60, weight=1:1, score=60
+				{Name: "n2", Score: 60}, // pc=20, rt=100, weight=1:1, score=60
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pl := &MinimizePower{
+				snapshotSharedLister: tt.fields.snapshotSharedLister,
+				ctrlclient:           tt.fields.ctrlclient,
+				metricsclient:        tt.fields.metricsclient,
+				predictorclient:      tt.fields.predictorclient,
+				args:                 tt.fields.args,
+			}
+			pl.NormalizeScore(tt.args.ctx, tt.args.cycleState, tt.args.pod, tt.args.scores)
+			got := tt.args.scores
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("MinimizePower.NormalizeScore() = %v, want %v", got, tt.want)
 			}
 		})
 	}

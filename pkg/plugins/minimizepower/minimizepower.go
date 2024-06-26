@@ -507,6 +507,8 @@ func (pl *MinimizePower) NormalizeScore(_ context.Context, _ *framework.CycleSta
 		}
 	}
 
+	klog.InfoS("MinimizePower.NormalizeScore splitted", "pod", pod.Name, "scoresPC", scoresPC, "scoresRT", scoresRT)
+
 	// normalize scores (values -> scores)
 	NormalizeValues2Scores(scoresPC, ScoreBase, ScoreReplaceMap)
 	NormalizeValues2Scores(scoresRT, ScoreBase, ScoreReplaceMap)
@@ -534,7 +536,7 @@ func (pl *MinimizePower) NormalizeScore(_ context.Context, _ *framework.CycleSta
 	}
 
 	// merge with weights
-	scoresMerged := MergeScores(scoresPC, scoresRT, pl.args.WeightPowerConsumption, pl.args.WeightResponseTime)
+	scoresMerged := MergeScores(scoresPC, scoresRT, weightPC, weightRT)
 
 	// update scores (this function must update the scores in-place)
 	for idx := range scores {
