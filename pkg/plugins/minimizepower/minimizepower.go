@@ -543,7 +543,7 @@ func (pl *MinimizePower) NormalizeScore(_ context.Context, _ *framework.CycleSta
 		scores[idx].Score = scoresMerged[idx].Score
 	}
 
-	klog.InfoS("MinimizePower.NormalizeScore merged with weights", "pod", pod.Name, "weightPC", weightPC, "weightRT", weightRT, "scores", scores)
+	klog.InfoS("MinimizePower.NormalizeScore merged with weights", "pod", pod.Name, "weightPC", weightPC, "weightRT", weightRT, "scores", scores, "len(scores)", len(scores))
 
 	return nil
 }
