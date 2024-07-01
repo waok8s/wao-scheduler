@@ -455,23 +455,28 @@ func (pl *MinimizePower) Score(ctx context.Context, state *framework.CycleState,
 	klog.InfoS("MinimizePower.Score", "pod", pod.Name, "node", nodeName)
 
 	var scorePC, scoreRT int64
-	var statusPC, statusRT *framework.Status
 
+	weightPC, weightRT := pl.getWeights(pod)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		scorePC, statusPC = pl.ScorePowerConsumption(ctx, state, pod, nodeName)
+		if weightPC > 0 {
+			scorePC, _ = pl.ScorePowerConsumption(ctx, state, pod, nodeName) // ignore status as it is always nil
+		} else {
+			klog.InfoS("MinimizePower.Score skip ScorePowerConsumption as weight=0", "pod", pod.Name, "node", nodeName)
+		}
 	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		scoreRT, statusRT = pl.ScoreResponseTime(ctx, state, pod, nodeName)
+		if weightRT > 0 {
+			scoreRT, _ = pl.ScoreResponseTime(ctx, state, pod, nodeName) // ignore status as it is always nil
+		} else {
+			klog.InfoS("MinimizePower.Score skip ScoreResponseTime as weight=0", "pod", pod.Name, "node", nodeName)
+		}
 	}()
 	wg.Wait()
-
-	// NOTE: in our implementation, statusPC and statusRT are always nil, so omit the check
-	_, _ = statusPC, statusRT
 
 	// combine values
 	if scorePC > math.MaxInt32 {
@@ -483,6 +488,28 @@ func (pl *MinimizePower) Score(ctx context.Context, state *framework.CycleState,
 		scoreRT = math.MaxInt32
 	}
 	return MergeInt32(int32(scorePC), int32(scoreRT)), nil
+}
+
+func (pl *MinimizePower) getWeights(pod *corev1.Pod) (wPC int, wRT int) {
+	wPC = pl.args.WeightPowerConsumption
+	{
+		v, ok := pod.GetAnnotations()[AnnotationWeightPowerConsumption]
+		if ok {
+			if vv, err := strconv.Atoi(v); err == nil && vv >= 0 {
+				wPC = vv
+			}
+		}
+	}
+	wRT = pl.args.WeightResponseTime
+	{
+		v, ok := pod.GetAnnotations()[AnnotationWeightResponseTime]
+		if ok {
+			if vv, err := strconv.Atoi(v); err == nil && vv >= 0 {
+				wRT = vv
+			}
+		}
+	}
+	return
 }
 
 func MergeInt32(a, b int32) int64 { return int64(a)<<32 | int64(uint32(b)) }
@@ -515,27 +542,8 @@ func (pl *MinimizePower) NormalizeScore(_ context.Context, _ *framework.CycleSta
 
 	klog.InfoS("MinimizePower.NormalizeScore normalized", "pod", pod.Name, "scoresPC", scoresPC, "scoresRT", scoresRT)
 
-	// get weights
-	weightPC := pl.args.WeightPowerConsumption
-	{
-		v, ok := pod.GetAnnotations()[AnnotationWeightPowerConsumption]
-		if ok {
-			if vv, err := strconv.Atoi(v); err == nil && vv >= 0 {
-				weightPC = vv
-			}
-		}
-	}
-	weightRT := pl.args.WeightResponseTime
-	{
-		v, ok := pod.GetAnnotations()[AnnotationWeightResponseTime]
-		if ok {
-			if vv, err := strconv.Atoi(v); err == nil && vv >= 0 {
-				weightRT = vv
-			}
-		}
-	}
-
 	// merge with weights
+	weightPC, weightRT := pl.getWeights(pod)
 	scoresMerged := MergeScores(scoresPC, scoresRT, weightPC, weightRT)
 
 	// update scores (this function must update the scores in-place)
