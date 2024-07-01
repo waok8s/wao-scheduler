@@ -9,6 +9,10 @@ A kube-scheduler with MinimizePower plugin and PodSpread plugin to schedule pods
 - [Getting Started](#getting-started)
   - [Installation](#installation)
   - [Deploy Pods with MinimizePower](#deploy-pods-with-minimizepower)
+    - [Use Predicted Power Consumption](#use-predicted-power-consumption)
+    - [Use Predicted Response Time](#use-predicted-response-time)
+      - [Set Application Name](#set-application-name)
+      - [Set Weights](#set-weights)
   - [Deploy Pods with PodSpread](#deploy-pods-with-podspread)
 - [Configuration](#configuration)
   - [MinimizePowerArgs](#minimizepowerargs)
@@ -22,9 +26,9 @@ A kube-scheduler with MinimizePower plugin and PodSpread plugin to schedule pods
 
 ## Overview
 
-WAO Scheduler schedules pods with features focused on minimizing power consumption. This is done by the following scheduler plugins:
+WAO Scheduler schedules pods with the WAO algorithm, which aims to minimize power consumption while keeping latency low, and optionally spread pods across nodes to keep availability high. This is done by the following scheduler plugins:
 
-- `MinimizePower`: Score nodes based on expected power consumption.
+- `MinimizePower`: Score nodes based on predicted **power consumption** and **response time**.
 - `PodSpread`: Keep availability high by spreading pods across nodes, works together with MinimizePower.
 
 ## Getting Started
@@ -68,6 +72,56 @@ This plugin is enabled by default, so you only need to set `spec.schedulerName`.
           cpu: 100m
         limits:
           cpu: 200m
+```
+
+#### Use Predicted Power Consumption
+
+The prerequisites are:
+- wao-core and wao-metrics-adapter are set up.
+- Power consumption prediction service is available.
+
+**So no additional configuration is needed in user's side.**
+
+#### Use Predicted Response Time
+
+The prerequisites are:
+- wao-core and wao-metrics-adapter are set up.
+- Response time prediction service is available.
+- **Application name is set in Pod's labels (if your model requires it).**
+- **Optionally, weights can be set in Pod's annotations to override the default values defined in the configuration.**
+
+##### Set Application Name
+
+Application name is fetched from labels in the following order:
+- `wao.bitmedia.co.jp/app`
+- `app.kubernetes.io/name`
+- `app`
+
+In the following example, the application name is set to `nginx1`.
+```diff
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: nginx
++   labels:
++     app.kubernetes.io/name: nginx1
++     app: nginx2
+```
+
+##### Set Weights
+
+Weights may be different for each application, and can be set in the following format to override the default values defined in the configuration.
+
+```diff
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: nginx
+    labels:
+      app: nginx
+    annotations:
++     wao.bitmedia.co.jp/weight-power-consumption: "7"
++     wao.bitmedia.co.jp/weight-response-time: "3"
 ```
 
 ### Deploy Pods with PodSpread
@@ -138,6 +192,8 @@ The following args can be set in `pluginConfig` to configure MinimizePower plugi
           predictorCacheTTL: 15m
           podUsageAssumption: 0.8
           cpuUsageFormat: Percent
+          weightPowerConsumption: 1
+          weightResponseTime: 1
 ```
 
 Preset values can be found in `config/base/cm.yaml`, and default values can be found in `pkg/plugins/minimizepower/types.go`. 
@@ -148,6 +204,8 @@ Preset values can be found in `config/base/cm.yaml`, and default values can be f
 - `cpuUsageFormat`: The format of CPU usage send to predictor.
   - `Raw`: [0.0, NumLogicalCores]
   - `Percent`: [0.0, 100.0]
+- `weightPowerConsumption`: The weight of power consumption in the score, must be >= 0.
+- `weightResponseTime`: The weight of response time in the score, must be >= 0.
 
 ## Development
 
