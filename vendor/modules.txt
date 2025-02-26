@@ -250,7 +250,7 @@ github.com/spf13/pflag
 # github.com/stoewer/go-strcase v1.3.0
 ## explicit; go 1.11
 github.com/stoewer/go-strcase
-# github.com/waok8s/wao-core v1.30.0
+# github.com/waok8s/wao-core v1.30.1
 ## explicit; go 1.22.2
 github.com/waok8s/wao-core/api/wao/v1beta1
 github.com/waok8s/wao-core/pkg/client
