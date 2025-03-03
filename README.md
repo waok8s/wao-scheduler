@@ -177,6 +177,8 @@ This project is following [Scheduling Framework](https://kubernetes.io/docs/conc
 
 Versioning: we use the same major.minor as Kubernetes, and the patch is our own.
 
+- 2025-03-03 `v1.30.2`
+  - Bump dependencies. 
 - 2025-02-26 `v1.30.1`
   - Bug fixes and improvements.
 - 2024-05-17 `v1.30.0`
