@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> This repository has been merged into [waok8s/waok8s](https://github.com/waok8s/waok8s) (v1.31+). All new development is there. Older versions remain here for reference only, but this repository is no longer maintained.
+
 # WAO Scheduler Version 2
 
 A kube-scheduler with MinimizePower plugin and PodSpread plugin to schedule pods with WAO.
@@ -199,7 +202,7 @@ This work is supported by the New Energy and Industrial Technology Development O
 ## License
 
 Copyright 2021 Osaka University.
-Copyright 2023 Bitmedia, Inc.
+Copyright 2023 Bitmedia Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
